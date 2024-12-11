@@ -1,11 +1,14 @@
-streamlit==1.31.1                # Latest stable version of Streamlit
-langchain==0.1.8                  # Compatible with langchain-core 0.1.x
-langchain-community==0.0.21       # Required for compatibility with langchain 0.1.x
-langchain-openai==0.0.6           # Compatible with langchain-core 0.1.x
-mysql-connector-python==8.0.29    # Compatible with MySQL 8.0.x
-groq==0.4.2                       # For integration with Groq
-langchain-groq==0.0.1             # Compatible with langchain-core 0.1.x
-openai==1.10.0                    # Compatible with langchain-openai 0.0.6
-python-dotenv==1.0.0              # For environment variable management
-google-generativeai==0.8.3
+streamlit==1.31.1
+langchain==0.0.308
+langchain-core==0.3.20
+langsmith>=0.1.125,<0.2.0
 langchain-google-genai==2.0.6
+google-generativeai==0.8.3
+mysql-connector-python==8.0.29
+groq==0.4.2
+langchain-community>=0.0.21
+langchain-openai>=0.0.6
+langchain-groq>=0.0.1
+openai==1.10.0
+python-dotenv==1.0.0
+spaCy == 3.4.0
