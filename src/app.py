@@ -14,7 +14,7 @@ from dateutil.relativedelta import relativedelta
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
-
+from decimal import Decimal
 # ================================================================
 # 0) CONFIG
 # ================================================================
@@ -486,6 +486,55 @@ def format_history_for_llm(history: List[Dict], max_messages: int = 10) -> str:
     recent = history[-max_messages:]
     return "\\n".join([f"{m['role']}: {m['content']}" for m in recent])
 
+def build_column_config(df: pd.DataFrame) -> dict:
+    config = {}
+    if df is None or df.empty:
+        return config
+
+    for col in df.columns:
+        col_lower = col.lower()
+
+        # Currency-ish columns
+        if any(k in col_lower for k in [
+            "sales", "revenue", "amount", "cost", "profit", "price", "order_total", "total"
+        ]):
+            config[col] = st.column_config.NumberColumn(label=col, format="$%.2f")
+
+        # Percent columns
+        elif any(k in col_lower for k in ["percent", "percentage", "rate", "margin"]):
+            config[col] = st.column_config.NumberColumn(label=col, format="%.2f%%")
+
+        # Optional quantities
+        elif any(k in col_lower for k in ["qty", "quantity", "units", "count"]):
+            config[col] = st.column_config.NumberColumn(label=col, format="%d")
+
+    return config
+
+def coerce_numeric_objects(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert Decimal/object numeric columns to float where possible so
+    Streamlit NumberColumn formatting applies.
+    """
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+
+    # First pass: convert Decimal cells -> float
+    for col in out.columns:
+        if out[col].dtype == "object":
+            # if the column contains Decimals, convert them
+            if out[col].map(lambda x: isinstance(x, Decimal)).any():
+                out[col] = out[col].map(lambda x: float(x) if isinstance(x, Decimal) else x)
+
+    # Second pass: try to coerce object columns that are numeric-like strings/values
+    for col in out.columns:
+        if out[col].dtype == "object":
+            coerced = pd.to_numeric(out[col], errors="ignore")
+            out[col] = coerced
+
+    return out
+
 # ================================================================
 # 6) STREAMLIT UI
 # ================================================================
@@ -534,7 +583,11 @@ for msg in st.session_state["history"]:
             display_df = msg["dataframe"].copy()
             if use_dates:
                 display_df = convert_periods_to_dates(display_df)
-            st.dataframe(display_df, use_container_width=True)
+            st.dataframe(
+                display_df,
+                column_config=build_column_config(display_df),
+                use_container_width=True
+            )
 
 # Chat input
 user_q = st.chat_input("Ask me a question about sales")
@@ -594,6 +647,7 @@ if user_q:
                 # Step 3: Execute SELECT
                 eng = get_engine(ALLOWED_DATABASES[0])
                 df = run_select_sql(eng, select_sql)
+                df = coerce_numeric_objects(df)
 
                 # Optional: convert Period columns to dates (if they exist)
                 if use_dates:
@@ -611,7 +665,13 @@ if user_q:
 
                 # Display results
                 st.success(f" Loaded {len(df)} rows")
-                st.dataframe(df.head(50), use_container_width=True)
+                column_config = build_column_config(df)
+
+                st.dataframe(
+                    df.head(50),
+                    column_config=column_config,
+                    use_container_width=True
+                )
 
 
                 response_msg = (
@@ -628,7 +688,7 @@ if user_q:
 
             else:
                 # Step 3b: Analyze existing data in memory
-                st.info("🔎 Analyzing existing results (no new SQL query)...")
+                st.info(" Analyzing existing results (no new SQL query)...")
 
                 df = st.session_state["current_data"]
 
@@ -650,7 +710,11 @@ if user_q:
                 # If question sounds like "show/list/what are", show some rows again
                 question_lower = user_q.lower()
                 if any(word in question_lower for word in ["show", "display", "list", "what are"]):
-                    st.dataframe(display_df.head(20), use_container_width=True)
+                    st.dataframe(
+                        display_df.head(20),
+                        column_config=build_column_config(display_df),
+                        use_container_width=True
+                    )
 
                 st.session_state["history"].append({
                     "role": "assistant",
