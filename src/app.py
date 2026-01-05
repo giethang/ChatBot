@@ -165,6 +165,48 @@ dbo.Product_Class
    class_description, is_active)
 
 ===============================================================================
+COLUMN UNIT HINTS (USE THESE FOR OUTPUT FORMATTING)
+===============================================================================
+
+CURRENCY (show as $):
+- ol.sales_amount, o.sub_total, o.discount_amount, o.surcharge_amount, o.shipping_amount
+- o.tax_amount01, o.tax_amount02, o.tax_amount03
+- o.order_total, ol.sales_cost, o.sales_cost
+- ol.gross_profit, o.gross_profit
+- ol.unit_price, ol.product_price, ol.unit_cost
+- p.cost_average, p.cost_last, p.standard_price
+
+PERCENT (show as %):
+- o.discount_percent
+- ol.commission_percent
+- a.inv_discount_percent
+
+QUANTITY (show as number with commas, no $):
+- ol.qty_ordered, ol.qty_picked, ol.qty_shipped
+- p.package_quantity, p.pallet_quantity
+
+WEIGHT:
+- o.total_weight, ol.weight
+
+VOLUME:
+- o.total_volume, ol.volume
+
+===============================================================================
+ALIAS CONVENTIONS (MUST USE THESE ALIASES WHEN RETURNING METRICS)
+===============================================================================
+Currency totals:
+- SUM(ol.sales_amount)  AS total_sales
+- SUM(ol.sales_cost)    AS total_cost
+- SUM(ol.gross_profit)  AS total_profit
+
+Quantity totals:
+- SUM(ol.qty_shipped)   AS total_units
+
+Percent metrics:
+- AVG(o.discount_percent) AS avg_discount_percent
+- AVG(ol.commission_percent) AS avg_commission_percent
+
+===============================================================================
 STANDARD JOINS
 ===============================================================================
 Sales_Order_Line ol  JOIN Sales_Order o   ON ol.order_key = o.order_key
@@ -486,6 +528,20 @@ def format_history_for_llm(history: List[Dict], max_messages: int = 10) -> str:
     recent = history[-max_messages:]
     return "\\n".join([f"{m['role']}: {m['content']}" for m in recent])
 
+def infer_unit_from_column_name(col: str) -> str:
+    c = col.lower()
+
+    if any(k in c for k in ["qty", "quantity", "units", "unit_count"]):
+        return "quantity"
+
+    if any(k in c for k in ["percent", "pct", "ratio", "rate"]):
+        return "percent"
+
+    if any(k in c for k in ["sales", "revenue", "amount", "total", "cost", "profit"]):
+        return "currency"
+
+    return "number"
+
 def build_column_config(df: pd.DataFrame) -> dict:
     config = {}
     if df is None or df.empty:
@@ -496,7 +552,7 @@ def build_column_config(df: pd.DataFrame) -> dict:
 
         # Currency-ish columns
         if any(k in col_lower for k in [
-            "sales", "revenue", "amount", "cost", "profit", "price", "order_total", "total"
+            "sales", "revenue", "amount", "cost", "profit", "price", "order_total", "total", "sales amount",
         ]):
             config[col] = st.column_config.NumberColumn(label=col, format="$%.2f")
 
