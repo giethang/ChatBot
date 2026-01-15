@@ -58,6 +58,93 @@ def get_engine(database: str) -> Engine:
     return make_engine(database)
 
 # ================================================================
+# 1B) SCHEMA INTROSPECTION (tables + column data types)
+# ================================================================
+@st.cache_data(show_spinner=False, ttl=24 * 3600)
+def load_schema_df(_engine: Engine, schema: str = "dbo") -> pd.DataFrame:
+    sql = """
+    SELECT
+        c.TABLE_SCHEMA,
+        c.TABLE_NAME,
+        c.COLUMN_NAME,
+        c.ORDINAL_POSITION,
+        c.DATA_TYPE,
+        c.CHARACTER_MAXIMUM_LENGTH,
+        c.NUMERIC_PRECISION,
+        c.NUMERIC_SCALE,
+        c.DATETIME_PRECISION
+    FROM INFORMATION_SCHEMA.COLUMNS c
+    WHERE c.TABLE_SCHEMA = :schema
+    ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
+    """
+    return pd.read_sql(text(sql), _engine, params={"schema": schema})
+
+
+def _format_sqlserver_type(row: pd.Series) -> str:
+    dt = str(row["DATA_TYPE"]).lower()
+
+    if dt in ("varchar", "nvarchar", "char", "nchar", "binary", "varbinary"):
+        n = row["CHARACTER_MAXIMUM_LENGTH"]
+        if pd.isna(n):
+            return dt
+        n = int(n)
+        return f"{dt}(max)" if n == -1 else f"{dt}({n})"
+
+    if dt in ("decimal", "numeric"):
+        p = row["NUMERIC_PRECISION"]
+        s = row["NUMERIC_SCALE"]
+        if pd.isna(p) or pd.isna(s):
+            return dt
+        return f"{dt}({int(p)},{int(s)})"
+
+    if dt in ("datetime2", "time"):
+        prec = row["DATETIME_PRECISION"]
+        if pd.isna(prec):
+            return dt
+        return f"{dt}({int(prec)})"
+
+    return dt
+
+
+def build_schema_text(
+    schema_df: pd.DataFrame,
+    include_only_tables: Optional[List[str]] = None,
+    exclude_tables: Optional[List[str]] = None,
+    max_cols_per_table: int = 250,
+) -> str:
+    if schema_df is None or schema_df.empty:
+        return "No tables/columns found."
+
+    df = schema_df.copy()
+
+    if exclude_tables:
+        ex = set(t.lower() for t in exclude_tables)
+        df = df[~df["TABLE_NAME"].str.lower().isin(ex)]
+
+    if include_only_tables:
+        inc = set(t.lower() for t in include_only_tables)
+        df = df[df["TABLE_NAME"].str.lower().isin(inc)]
+
+    lines = []
+    lines.append("===============================================================================")
+    lines.append("AVAILABLE TABLES (MrDairyNovus) — columns + SQL Server data types (authoritative)")
+    lines.append("===============================================================================")
+
+    for tbl, g in df.groupby("TABLE_NAME", sort=True):
+        g = g.sort_values("ORDINAL_POSITION").head(max_cols_per_table)
+
+        col_parts = []
+        for _, r in g.iterrows():
+            col_name = r["COLUMN_NAME"]
+            col_type = _format_sqlserver_type(r)
+            col_parts.append(f"{col_name} {col_type}")
+
+        cols_str = ",\n    ".join(col_parts)
+        lines.append(f"\ndbo.{tbl}\n  (\n    {cols_str}\n  )")
+
+    return "\n".join(lines)
+
+# ================================================================
 # 2) LLM HELPERS
 # ================================================================
 def get_llm():
@@ -114,82 +201,70 @@ You must not use EXEC, stored procedures, INSERT, UPDATE, DELETE, DROP, or any w
 AVAILABLE TABLES (MrDairyNovus)
 ===============================================================================
 
-dbo.Sales_Order
-  (order_key, order_no, order_date, invoice_date,
-   order_type, order_status, order_stage, order_source,
-   is_credited, is_a_credit, applied_to, applied_orders,
-   bill_to_key, bill_to_id, bill_to_name,
-   ship_to_key, ship_to_id, ship_to_name,
-   customer_service_rep, sales_rep_id,
-   sub_total, discount_percent, discount_amount,
-   surcharge_amount, shipping_amount,
-   tax_amount01, tax_amount02, tax_amount03,
-   order_total, sales_cost, gross_profit,
-   total_weight, total_volume)
-
-dbo.Sales_Order_Line
-  (order_line_key, order_key, line, sub_line, line_type,
-   product_key, product_id, product_descr, uom,
-   qty_ordered, qty_picked, qty_shipped,
-   product_price, unit_price,
-   sales_amount, sales_cost, gross_profit,
-   unit_cost, commission_percent,
-   weight, volume)
-
-dbo.Firm
-  (firm_key, firm_id, name,
-   address, address2, city_key, zip,
-   phone, fax, website,
-   firm_type, is_active,
-   shipvia, route_main,
-   CSR_1, CSR_2, CSR_3, CSR_4, CSR_5, CSR_6, CSR_7)
-
-dbo.Firm_Account
-  (firm_account_key, firm_key,
-   terms_code, status,
-   account_class, account_rank,
-   sales_rep_id, customer_service_rep,
-   credit_limit, price_table,
-   min_order_value, inv_discount_percent)
-
-dbo.Product
-  (product_key, product_id, description,
-   is_active, product_class_id,
-   product_type, product_category,
-   unit_of_measure, package_quantity, pallet_quantity,
-   cost_average, cost_last, cost_currency,
-   standard_price)
-
-dbo.Product_Class
-  (product_class_key, product_class_id,
-   class_description, is_active)
+{schema_text}
 
 ===============================================================================
 COLUMN UNIT HINTS (USE THESE FOR OUTPUT FORMATTING)
 ===============================================================================
 
+IMPORTANT:
+- Return raw numeric values in SQL (NO FORMAT()).
+- The UI applies $ / % / commas using these hints.
+
 CURRENCY (show as $):
+Sales / invoice money:
 - ol.sales_amount, o.sub_total, o.discount_amount, o.surcharge_amount, o.shipping_amount
 - o.tax_amount01, o.tax_amount02, o.tax_amount03
-- o.order_total, ol.sales_cost, o.sales_cost
-- ol.gross_profit, o.gross_profit
+- o.order_total, o.sales_cost, ol.sales_cost
+- o.gross_profit, ol.gross_profit
 - ol.unit_price, ol.product_price, ol.unit_cost
+- o.freight_cost, o.tariff_amount, ol.tariff_amount
+- o.commission_amount
+
+Customer account money:
+- a.credit_limit, a.min_order_value
+- a.shipping_charges, a.free_shipping_min_order
+
+Product money:
 - p.cost_average, p.cost_last, p.standard_price
+
+Rate / pricing money:
+- rv.rate, rdv.rate   (Rate_Value.rate, Rate_Discount_Value.rate)
+- ol.price_discount_amount, ol.discount_amount
 
 PERCENT (show as %):
 - o.discount_percent
 - ol.commission_percent
+- ol.price_discount_percent
+- ol.tariff_percent
 - a.inv_discount_percent
+- a.is_fluctuation_skipped (BIT flag, not percent — do NOT format as %)
 
 QUANTITY (show as number with commas, no $):
+Line quantities:
 - ol.qty_ordered, ol.qty_picked, ol.qty_shipped
+Packaging quantities:
 - p.package_quantity, p.pallet_quantity
+Order handling counts:
+- o.pallets, o.packages, o.pieces, o.handling_units
+Rate ranges:
+- rv.low_range_quantity, rv.high_range_quantity
+- rdv.low_range_quantity, rdv.high_range_quantity
 
 WEIGHT:
-- o.total_weight, ol.weight
+- o.total_weight, o.weight
+- ol.weight
+- p.dim_weight, p.package_weight, p.pallet_weight
 
-VOLUME:
-- o.total_volume, ol.volume
+VOLUME / CUBE:
+- o.total_volume, o.cube
+- ol.volume
+- p.dim_cube, p.package_cube, p.pallet_cube
+
+DIMENSIONS (length/width/height) — treat as numeric, not currency:
+- p.dim_height, p.dim_length, p.dim_width
+- p.package_height, p.package_length, p.package_width
+- p.pallet_height, p.pallet_length, p.pallet_width
 
 ===============================================================================
 ALIAS CONVENTIONS (MUST USE THESE ALIASES WHEN RETURNING METRICS)
@@ -317,6 +392,7 @@ Use TOP(N) if user requests top N.
 ===============================================================================
 OUTPUT REQUIREMENTS
 ===============================================================================
+- NEVER use FORMAT() or convert numeric metrics to strings. Return raw numeric values. Formatting ($, %, commas) is handled by the UI.
 - Output ONLY the SQL (no explanation, no comments, no backticks)
 - Must be a single valid T-SQL query (CTEs allowed)
 - Must answer the user's question exactly
@@ -529,15 +605,26 @@ def format_history_for_llm(history: List[Dict], max_messages: int = 10) -> str:
     return "\\n".join([f"{m['role']}: {m['content']}" for m in recent])
 
 def infer_unit_from_column_name(col: str) -> str:
-    c = col.lower()
+    c = col.lower().strip()
 
-    if any(k in c for k in ["qty", "quantity", "units", "unit_count"]):
+    # --- Quantity FIRST (so "total_units" doesn't get caught by "total") ---
+    if any(k in c for k in [
+        "total_units", "units", "unit", "qty", "quantity", "count", "pieces", "packages", "pallets", "handling_units"
+    ]):
         return "quantity"
 
-    if any(k in c for k in ["percent", "pct", "ratio", "rate"]):
+    # Percent
+    if any(k in c for k in ["percent", "pct", "ratio", "rate", "margin"]):
         return "percent"
 
-    if any(k in c for k in ["sales", "revenue", "amount", "total", "cost", "profit"]):
+    # Weight / Volume
+    if "weight" in c:
+        return "weight"
+    if any(k in c for k in ["volume", "cube"]):
+        return "volume"
+
+    # Currency (keep "total" OUT of this list)
+    if any(k in c for k in ["sales", "revenue", "amount", "cost", "profit", "price", "freight", "tariff", "commission"]):
         return "currency"
 
     return "number"
@@ -550,21 +637,38 @@ def build_column_config(df: pd.DataFrame) -> dict:
     for col in df.columns:
         col_lower = col.lower()
 
-        # Currency-ish columns
+        # 1) Quantity FIRST (avoid "unit" to not catch unit_price)
         if any(k in col_lower for k in [
-            "sales", "revenue", "amount", "cost", "profit", "price", "order_total", "total", "sales amount",
+            "total_units", "units", "qty", "quantity", "count",
+            "pieces", "packages", "pallets", "handling_units"
+        ]):
+            config[col] = st.column_config.NumberColumn(label=col, format="%.0f")
+            continue
+
+        # 2) Percent
+        if any(k in col_lower for k in ["percent", "percentage", "pct", "rate", "margin"]):
+            config[col] = st.column_config.NumberColumn(label=f"{col} (%)", format="%.2f")
+            continue
+
+        # 3) Weight / Volume
+        if "weight" in col_lower:
+            config[col] = st.column_config.NumberColumn(label=col, format="%.2f")
+            continue
+
+        if any(k in col_lower for k in ["volume", "cube"]):
+            config[col] = st.column_config.NumberColumn(label=col, format="%.2f")
+            continue
+
+        # 4) Currency LAST (NO comma format - prevents sprintf error)
+        if any(k in col_lower for k in [
+            "sales", "revenue", "amount", "cost", "profit", "price",
+            "freight", "tariff", "commission", "credit_limit", "min_order_value"
         ]):
             config[col] = st.column_config.NumberColumn(label=col, format="$%.2f")
-
-        # Percent columns
-        elif any(k in col_lower for k in ["percent", "percentage", "rate", "margin"]):
-            config[col] = st.column_config.NumberColumn(label=col, format="%.2f%%")
-
-        # Optional quantities
-        elif any(k in col_lower for k in ["qty", "quantity", "units", "count"]):
-            config[col] = st.column_config.NumberColumn(label=col, format="%d")
+            continue
 
     return config
+
 
 def coerce_numeric_objects(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -693,15 +797,45 @@ if user_q:
                 st.info(" Fetching new data from database (SELECT only)...")
 
                 select_chain = SELECT_PROMPT | get_llm() | StrOutputParser()
+                # Build schema_text (tables + data types) once per run (cached)
+                eng = get_engine(ALLOWED_DATABASES[0])
+                schema_df = load_schema_df(eng, schema="dbo")
+
+                TABLE_WHITELIST = [
+                    "Sales_Order",
+                    "Sales_Order_Line",
+                    "Firm",
+                    "Firm_Account",
+                    "Firm_Contact",
+                    "Product",
+                    "Product_Class",
+                    "Product_Vendor",
+                    "Rate",
+                    "Rate_Discount",
+                    "Rate_Discount_Item",
+                    "Rate_Discount_Period",
+                    "Rate_Discount_Value",
+                    "Rate_Item",
+                    "Rate_Period",
+                    "Rate_Value",
+                ]
+
+                schema_text = build_schema_text(
+                    schema_df,
+                    include_only_tables=TABLE_WHITELIST,
+                    exclude_tables=["sysdiagrams"],
+                )
+
+                select_chain = SELECT_PROMPT | get_llm() | StrOutputParser()
                 select_sql = select_chain.invoke({
                     "history": history_str,
-                    "question": user_q
+                    "question": user_q,
+                    "schema_text": schema_text
                 }).strip()
 
                 st.code(select_sql, language="sql")
 
                 # Step 3: Execute SELECT
-                eng = get_engine(ALLOWED_DATABASES[0])
                 df = run_select_sql(eng, select_sql)
                 df = coerce_numeric_objects(df)
 
