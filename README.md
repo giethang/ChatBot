@@ -63,6 +63,9 @@ py -m spacy download en_core_web_sm
 
 # 7) Create a .env file and add your API key
 
+Right click on the project folder and create a new file called .env
+Add the following lines to the file:
+
 # === LangChain ===
 
 LANGCHAIN_API_KEY=
@@ -80,8 +83,6 @@ MSSQL_ODBC_DRIVER=ODBC Driver 17 for SQL Server
 # === Groq (your app uses ChatGroq) ===
 
 GROQ_API_KEY=
-
-For the MSSQL_USER and MSSQL_PASSWORD, you can use the credentials for the Novus database (ask IT for help).
 
 # 8) Run the app (if it’s Streamlit)
 
