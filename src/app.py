@@ -24,7 +24,7 @@ load_dotenv()
 SERVER_HOST = os.getenv("MSSQL_HOST", "10.1.1.4")
 SERVER_PORT = os.getenv("MSSQL_PORT", "1433")
 SQLSERVER_DRIVER = os.getenv("MSSQL_ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
-SQL_USER = os.getenv("MSSQL_USER", "gthang")
+SQL_USER = os.getenv("MSSQL_USER", "")
 SQL_PASSWORD = os.getenv("MSSQL_PASSWORD", "")
 ALLOWED_DATABASES = ["MrDairyNovus"]
 

@@ -7,20 +7,36 @@ It connects to your **SQL Server database** and allows you to ask natural-langua
 
 ## STEP-BY-STEP SETUP GUIDE
 
-### 1. Unzip the Project
+### 1. Clone the Repo and run on the correct branch
 
-1. Locate and unzip the project folder (for example `Novus Chatbot.zip`).
-2. Move the extracted folder to your desired location (e.g. Desktop).
-3. Open **PowerShell** or **Command Prompt** and navigate to the project folder:
-   ```bash
-   cd "C:\Users\<yourname>\Desktop\Novus\Novus Chatbot\ChatBot"
-   ```
+1. Open PowerShell and go to where you want the project folder (example: Desktop):
+
+cd "$env:USERPROFILE\Desktop"
+git clone https://github.com/giethang/ChatBot.git
+cd ChatBot
+
+2. Switch to the correct Git branch
+
+This project must be run from the NovusIndividualDatabase_C branch.
+
+3. Run:
+
+git fetch
+git checkout NovusIndividualDatabase_C
+
+4. Verify you’re on the correct branch:
+
+git branch
+
+You should see:
+
+- NovusIndividualDatabase_C
 
 # 2) Create a virtual env with the launcher
 
 py -3.12 -m venv .venv
 
-# 3) Activate the venv
+# 3) _IMPORTANT_: Activate the venv
 
 .venv\Scripts\activate
 
@@ -37,18 +53,50 @@ py --version
 
 py -m pip install --upgrade pip
 
-# ) Install deps
+# 5) Install deps
 
 py -m pip install -r requirements.txt
 
-# 7) Get the spaCy model your app.py uses
+# 6) Get the spaCy model your app.py uses
 
-# 9) Create a .env file and add your API key
+py -m spacy download en_core_web_sm
 
-# === API KEYS ===
+# 7) Create a .env file and add your API key
 
-# === SQL SERVER CONFIGURATION ===
+# === LangChain ===
+
+LANGCHAIN_API_KEY=
+LANGCHAIN_TRACING_V2=true
+
+# === SQL Server Config ===
+
+MSSQL_HOST=10.1.1.4
+MSSQLUAT_HOST=172.20.30.10
+MSSQL_PORT=1433
+MSSQL_USER=
+MSSQL_PASSWORD=
+MSSQL_ODBC_DRIVER=ODBC Driver 17 for SQL Server
+
+# === Groq (your app uses ChatGroq) ===
+
+GROQ_API_KEY=
+
+For the MSSQL_USER and MSSQL_PASSWORD, you can use the credentials for the Novus database (ask IT for help).
 
 # 8) Run the app (if it’s Streamlit)
 
 streamlit run src\app.py
+
+# FAQ or common errors:
+
+“Data source name not found / ODBC Driver 17…”
+
+Install Microsoft ODBC Driver 17 for SQL Server (and restart terminal after install).
+
+“Module not found”
+
+You likely didn’t activate the venv or installed packages outside it.
+Re-run:
+
+.\.venv\Scripts\Activate.ps1
+py -m pip install -r requirements.txt
