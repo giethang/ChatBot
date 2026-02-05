@@ -766,6 +766,7 @@ st.image("./VisfutureLogo.png")
 st.title(" Sales Analysis Chatbot ")
 
 st.caption("Ask questions about sales data. I’ll generate SELECT queries and remember our conversation so you can drill down on existing results.")
+st.caption("*IMPORANT*: If the Routing decision does not fetch new data, try writing -> with a new query in the end of the sentence.")
 
 # Initialize session state
 if "history" not in st.session_state:
