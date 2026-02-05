@@ -356,9 +356,21 @@ Header metrics (only when explicitly requested):
 ===============================================================================
 GROUPING RULES
 ===============================================================================
-By customer:
-    Use Sales_Order_Line + Sales_Order join
-    Group by f.firm_id, f.name  (or o.bill_to_id, o.bill_to_name if firm not required)
+
+General rule:
+- Any non-aggregated columns in SELECT MUST appear in GROUP BY.
+- Prefer stable IDs + human-readable names together (e.g., firm_id + name).
+
+By customer (billing customer):
+    Use Sales_Order_Line + Sales_Order join.
+    Preferred:
+        Group by f.firm_id, f.name
+    If Firm join is not used:
+        Group by o.bill_to_id, o.bill_to_name
+
+By customer (ship-to / delivery customer):
+    If the user explicitly asks by ship-to:
+        Group by o.ship_to_id, o.ship_to_name
 
 By product:
     Group by ol.product_id, p.description
@@ -366,11 +378,63 @@ By product:
 By product class:
     Group by pc.product_class_id, pc.class_description
 
+By vendor (Product_Vendor):
+    Join Product_Vendor pv ON pv.product_key = p.product_key (or pv.firm_id if needed)
+    Group by pv.firm_id, pv.name
+    Notes:
+    - If multiple vendors per product exist and user doesn’t specify “active vendor”, filter pv.is_active = 1.
+
 By sales rep:
-    Group by a.customer_service_rep
+    If question is about order header rep:
+        Group by o.sales_rep_id
+    If question is about account rep:
+        Group by a.sales_rep_id
+    (If both are selected, group by both.)
+
+By customer service rep (CSR):
+    If asked for CSR on the order:
+        Group by o.customer_service_rep
+    If asked for CSR on the account:
+        Group by a.customer_service_rep
+
+By firm/account classification:
+    Group by a.account_class
+    If ranking needed:
+        Group by a.account_rank
+
+By terms/status:
+    Group by a.terms_code
+    Group by a.status
+
+By firm type:
+    Group by f.firm_type
+
+By contact (Firm_Contact):
+    Join Firm_Contact fc ON fc.firm_key = f.firm_key
+    Group by fc.contact_name, fc.job_title
+    (Only if user explicitly asks “by contact” or “contact list”; otherwise avoid joining contacts.)
+
+By currency:
+    If user asks "by currency":
+        Group by o.currency
+    If comparing product cost currency:
+        Group by p.cost_currency
+
+By rate / pricing (Rate tables):
+    If user asks "by rate id" or "by rate description":
+        Join Rate_Period rp ON rp.rate_key = r.rate_key
+        Join Rate r ON r.rate_key = rp.rate_key
+        Group by r.rate_id, r.description
+    If user asks "by rate type":
+        Group by rv.rate_type (or rdv.rate_type for discounts)
 
 By date:
-    Group by date/month expression used
+    Monthly:
+        Group by FORMAT(o.invoice_date, 'yyyy-MM')
+    Daily:
+        Group by CAST(o.invoice_date AS date)
+    Any other date dimension:
+        Group by the exact date expression used in SELECT
 
 ===============================================================================
 TOTAL COLUMN REQUIREMENTS
@@ -803,6 +867,7 @@ if user_q:
 
                 TABLE_WHITELIST = [
                     "Sales_Order",
+                    "City",
                     "Sales_Order_Line",
                     "Firm",
                     "Firm_Account",
