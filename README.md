@@ -9,9 +9,9 @@ It connects to your **SQL Server database** and allows you to ask natural-langua
 
 ### 1. Clone the Repo and run on the correct branch
 
-1. Open PowerShell and go to where you want the project folder (example: Desktop):
+1. Open PowerShell and go to where you want the project folder :
 
-cd "$env:USERPROFILE\Desktop"
+cd "folderpath"
 git clone https://github.com/giethang/ChatBot.git
 cd ChatBot
 
